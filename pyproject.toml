@@ -17,3 +17,7 @@ packages = ["src/ruleshift"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: long-running known-result checks (run with: pytest -m slow)",
+]
