@@ -17,7 +17,8 @@ packages = ["src/ruleshift"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not slow'"
+addopts = "-m 'not slow and not frontier'"
 markers = [
-    "slow: long-running known-result checks (run with: pytest -m slow)",
+    "slow: heavier known-result checks, ~5s-2min each (run with: pytest -m slow)",
+    "frontier: beyond pure-Python v1 solver reach, see docs/benchmarks.md (pytest -m frontier)",
 ]

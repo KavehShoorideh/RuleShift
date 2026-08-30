@@ -97,18 +97,39 @@ class Solver:
             moves.remove(tt_move)
             moves.insert(0, tt_move)
 
+        if not misere:
+            # Immediate win: any move completing a line wins on the spot.
+            for mv in moves:
+                if completes(cur | (1 << mv), mv):
+                    self.tt[key] = (WIN, EXACT, mv)
+                    return WIN
+            # Threat-forced restriction (normal play only): cells where the
+            # OPPONENT would complete a line next turn. With no immediate win
+            # of our own, two open threats are unanswerable (they occupy
+            # distinct cells -- distinct columns under gravity -- and playing
+            # elsewhere leaves each threat cell playable for the opponent);
+            # one open threat forces the block. Certified vs. the reference
+            # solver in tests.
+            threat = -1
+            for mv in moves:
+                if completes(opp | (1 << mv), mv):
+                    if threat >= 0:
+                        self.tt[key] = (LOSS, EXACT, mv)
+                        return LOSS
+                    threat = mv
+            if threat >= 0:
+                moves = [threat]
+
         best = -2
         best_move = -1
         forced_loss_move = -1
         for mv in moves:
             nxt = cur | (1 << mv)
             if completes(nxt, mv):
-                if misere:
-                    # value LOSS: dominated whenever any non-completing move exists
-                    forced_loss_move = mv
-                    continue
-                v = WIN
-            elif (nxt | opp) == full:
+                # misere only: normal play returned above on completing moves
+                forced_loss_move = mv
+                continue
+            if (nxt | opp) == full:
                 v = DRAW
             else:
                 v = -self._search(opp, nxt, -beta, -alpha)

@@ -54,6 +54,8 @@ Grid exclusion: variants with k > max(m, n) are excluded from the standard grid
 - Exact negamax, fail-soft alpha-beta over {-1, 0, +1}, transposition table with
   EXACT/LOWER/UPPER flags and best-move ordering; correctness certified against a
   pruning-free reference solver on small variants across all knob combinations.
+- Threat-forced move restriction in normal play (win now, else block a lone
+  immediate threat; two open threats are a loss). Not applied under misere.
 - Dead-position rule: a position where every line contains stones of both
   players is an exact draw (holds in misere too) and is cut off immediately.
 - No symmetry reduction in v1 (parking lot). Pure Python; numba/bitboard

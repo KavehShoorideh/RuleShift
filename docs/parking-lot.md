@@ -3,8 +3,13 @@
 New ideas land here, not in the plan (docs/plan.md). Reviewed only at gates.
 
 ## Harness / performance
-- Symmetry reduction in the solver TT (dihedral; torus adds translations — big win there).
-- Numba/C bitboard solver if a grid variant is out of pure-Python reach (measure first).
+**Measured 2026-08-30 (docs/benchmarks.md): frontier variants out of pure-Python
+reach exist** — no-gravity k=4 boards >= 24 cells and 6x6 gravity. Needed only
+if experiments must label those variants; candidate techniques, in order:
+- Symmetry reduction in the solver TT (mirror symmetry alone roughly halves
+  initial-position work; dihedral for square boards; torus adds translations).
+- Iterative deepening / better move ordering (threat-count ordering, killer moves).
+- Numba/C bitboard solver.
 - TT memory cap + replacement policy for the largest variants.
 - Mixed optimal/ε-random position sampling for datasets (v1 is uniform-random playouts).
 

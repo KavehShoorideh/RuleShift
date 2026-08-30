@@ -19,6 +19,7 @@ CERT_VARIANTS = [
     dict(m=4, n=3, k=3),
     dict(m=4, n=3, k=3, misere=True),
     dict(m=4, n=3, k=3, forbidden=frozenset({(2, 3)})),
+    dict(m=4, n=3, k=3, gravity=True),
     dict(m=4, n=4, k=4, gravity=True),
     dict(m=4, n=4, k=4, gravity=True, misere=True),
     dict(m=4, n=4, k=3, gravity=True, torus=True),
