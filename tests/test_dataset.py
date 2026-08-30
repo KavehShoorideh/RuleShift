@@ -68,3 +68,14 @@ def test_build_save_load_roundtrip(tmp_path):
     assert loaded_rules == rules
     assert np.array_equal(loaded["boards"], data["boards"])
     assert np.array_equal(loaded["states"], data["states"])
+
+
+def test_build_dataset_explicit_states():
+    from ruleshift.dataset import build_dataset as bd
+
+    engine = Engine(Ruleset(m=3, n=3, k=3))
+    solver = Solver(engine)
+    states = [engine.play([0, 4, 1])[0], engine.play([4])[0]]
+    data = bd(engine, solver, n=0, states=states)
+    assert [tuple(int(x) for x in s) for s in data["states"]] == states
+    assert data["values"][0] == solver.policy(states[0])[0]

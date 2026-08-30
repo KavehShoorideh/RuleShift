@@ -42,23 +42,25 @@ from ruleshift.training import TrainConfig, adapt, eval_model_regret, tensorize,
 def V(m, n, **kw):
     return Ruleset(m=m, n=n, k=3, **kw)
 
+# Feasibility-gated pilot pool. Misere/torus labeling cost grows fast with
+# board area (no threat pruning under misere), so those flags stay on <= 16-cell
+# boards; gravity collapses state spaces and is cheap everywhere.
 BOARDS = [(m, n) for m in (3, 4, 5) for n in (3, 4, 5)]
-FLAG_BOARDS = [(3, 3), (4, 3), (3, 4), (4, 4), (5, 5)]
 
 TRAIN = (
     [V(m, n) for m, n in BOARDS]
-    + [V(m, n, gravity=True) for m, n in FLAG_BOARDS]
-    + [V(m, n, misere=True) for m, n in FLAG_BOARDS]
-    + [V(m, n, torus=True) for m, n in [(3, 3), (4, 4), (5, 5)]]
+    + [V(m, n, gravity=True) for m, n in [(3, 3), (4, 3), (3, 4), (4, 4), (5, 5)]]
+    + [V(m, n, misere=True) for m, n in [(3, 3), (4, 3), (3, 4), (4, 4)]]
+    + [V(m, n, torus=True) for m, n in [(3, 3), (4, 4)]]
 )
 HELD = (
     [(V(5, 4, gravity=True), "interp"), (V(4, 5, gravity=True), "interp"),
-     (V(5, 4, misere=True), "interp"), (V(4, 5, misere=True), "interp"),
+     (V(5, 3, misere=True), "interp"), (V(3, 5, misere=True), "interp"),
      (V(4, 3, torus=True), "interp"), (V(3, 4, torus=True), "interp")]
     + [(V(4, 4, gravity=True, misere=True), "extrap"),
        (V(5, 4, gravity=True, misere=True), "extrap"),
-       (V(4, 4, misere=True, torus=True), "extrap"),
-       (V(4, 4, gravity=True, misere=True, torus=True), "extrap")]
+       (V(3, 3, misere=True, torus=True), "extrap"),
+       (V(3, 3, gravity=True, misere=True, torus=True), "extrap")]
 )
 
 # ------------------------------------------------------------------- pipeline
@@ -72,25 +74,35 @@ def get_dataset(rules, n, seed, data_dir, cache_dir):
     if tt.exists():
         solver.load(tt)
     t0 = time.time()
-    data = build_dataset(engine, solver, n=n, seed=seed)
+    data = build_dataset(engine, solver, n=n, seed=seed, strict=False)
     solver.save(tt)
     save_dataset(path, data, rules)
-    print(f"  labeled {rules.variant_id}: {n} positions in {time.time() - t0:.1f}s", flush=True)
+    got = len(data["values"])
+    note = "" if got == n else f" (variant capacity: {got} < {n} requested)"
+    print(f"  labeled {rules.variant_id}: {got} positions in {time.time() - t0:.1f}s{note}", flush=True)
     return data
 
 
-def eval_pack(rules, train_states, n_eval, seed, cache_dir):
-    """Eval positions disjoint from the adaptation pool + a shared solver."""
+def held_pack(rules, train_n, n_eval, seed_split, cache_dir):
+    """Capacity-aware disjoint split for a held-out variant: sample once,
+    shuffle deterministically, carve eval positions and an adaptation pool
+    that never overlap; label the pool with the (cached) solver."""
     engine = Engine(rules)
     solver = Solver(engine)
     tt = table_path(cache_dir, rules, "tt")
     if tt.exists():
         solver.load(tt)
-    pool = {tuple(int(x) for x in s) for s in train_states}
-    cand = sample_positions(engine, min(4 * n_eval, 3 * n_eval + 600), seed=seed)
-    positions = [s for s in cand if s not in pool][:n_eval]
-    assert len(positions) >= n_eval // 2, f"{rules.variant_id}: only {len(positions)} eval positions"
-    return engine, solver, positions
+    cand = sample_positions(engine, train_n + 2 * n_eval, seed=0, strict=False)
+    rng = np.random.default_rng(seed_split)
+    rng.shuffle(cand)
+    eval_take = min(n_eval, max(100, len(cand) // 4))
+    if len(cand) < eval_take + 100:
+        raise ValueError(f"{rules.variant_id}: only {len(cand)} states; too small for the protocol")
+    positions = cand[:eval_take]
+    pool = cand[eval_take : eval_take + train_n]
+    data = build_dataset(engine, solver, n=len(pool), states=pool)
+    solver.save(tt)
+    return engine, solver, positions, data, len(pool)
 
 
 def main():
@@ -108,6 +120,7 @@ def main():
     ap.add_argument("--data-dir", default=str(ROOT / "data/datasets"))
     ap.add_argument("--cache-dir", default=str(ROOT / "data/tables"))
     ap.add_argument("--fig-dir", default=str(ROOT / "figures"))
+    ap.add_argument("--label-only", action="store_true", help="build/cache datasets, then exit")
     args = ap.parse_args()
 
     cfg = vars(args) | {
@@ -126,10 +139,12 @@ def main():
         ]
         held_packs = []
         for i, (rules, split) in enumerate(HELD):
-            data = get_dataset(rules, args.train_positions, 0, args.data_dir, args.cache_dir)
-            engine, solver, positions = eval_pack(
-                rules, data["states"], args.eval_positions, 9000 + i, args.cache_dir
+            t0 = time.time()
+            engine, solver, positions, data, pool_size = held_pack(
+                rules, args.train_positions, args.eval_positions, 9000 + i, args.cache_dir
             )
+            print(f"  held-out {rules.variant_id}: pool {pool_size}, eval {len(positions)} "
+                  f"({time.time() - t0:.1f}s)", flush=True)
             dist = min(rules.distance(t) for t in TRAIN)
             rng = np.random.default_rng(500 + i)
             rand_fn = lambda s, _e=engine, _r=rng: _e.legal_moves(s)[_r.integers(len(_e.legal_moves(s)))]
@@ -140,6 +155,10 @@ def main():
             )
             run.log(kind="variant", variant=rules.variant_id, split=split, dist=dist,
                     random_regret=rand_regret)
+        if args.label_only:
+            run.finish(label_only=True)
+            print("labeling done (label-only mode)", flush=True)
+            return
 
         results = []
         for seed in range(args.seeds):
@@ -271,10 +290,10 @@ def make_figures(results, budgets, fig_dir):
         per_var.setdefault(r["variant"], dict(dist=r["dist"], vals=[], rand=r["random_regret"]))
         per_var[r["variant"]]["vals"].append(r["mean_regret"])
     jitter = {v: (i % 3 - 1) * 0.06 for i, v in enumerate(sorted(per_var))}
-    for v, d in sorted(per_var.items()):
+    for i, (v, d) in enumerate(sorted(per_var.items())):
         x, y = d["dist"] + jitter[v], float(np.mean(d["vals"]))
         ax.scatter([x], [y], s=64, color=BLUE, zorder=4)
-        ax.annotate(v, (x, y), xytext=(0, -11), textcoords="offset points",
+        ax.annotate(v, (x, y), xytext=(0, -12 if i % 2 else 8), textcoords="offset points",
                     ha="center", fontsize=6.5, color=MUTED)
     rand = float(np.mean([d["rand"] for d in per_var.values()]))
     ax.axhline(rand, color=BASE, linewidth=1.2, linestyle=(0, (2, 3)))

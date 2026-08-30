@@ -64,11 +64,20 @@ def encode_state(engine: Engine, state: State) -> np.ndarray:
     return arr
 
 
-def build_dataset(engine: Engine, solver: Solver, n: int, seed: int = 0) -> dict[str, np.ndarray]:
+def build_dataset(
+    engine: Engine,
+    solver: Solver,
+    n: int,
+    seed: int = 0,
+    strict: bool = True,
+    states: list[State] | None = None,
+) -> dict[str, np.ndarray]:
     """Arrays: boards (N,3,n,m), values (N,), policy_mask/legal_mask (N, n*m)
     multi-hot, states (N,2) uint64, rule_vector (6,). Policy target =
-    uniform over the optimal-move set (normalize model-side from the mask)."""
-    states = sample_positions(engine, n, seed=seed)
+    uniform over the optimal-move set (normalize model-side from the mask).
+    Pass `states` to label an explicit position list instead of sampling."""
+    if states is None:
+        states = sample_positions(engine, n, seed=seed, strict=strict)
     ncells = engine.rules.num_cells
     boards = np.stack([encode_state(engine, s) for s in states])
     values = np.zeros(len(states), dtype=np.int8)
