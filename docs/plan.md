@@ -40,8 +40,9 @@ Any H1 outcome is publishable: positive → factorization thesis confirmed in ad
 - Base family: m,n,k-games (tic-tac-toe = 3,3,3). Rule knobs (each a coordinate in rule space):
   - board (m,n) ∈ {3..6}², k ∈ {3,4}; gravity on/off (Connect-Four-ification); misère on/off (goal inversion); torus wrap on/off; forbidden-cell masks; optional: pie rule, double-move.
 - Rule distance: edit distance in knob space (and a learned/behavioral distance as analysis).
-- Ground truth: exact negamax with transposition tables (all chosen sizes solvable in minutes; cache per-variant solution tables to disk once).
+- Ground truth: exact negamax with transposition tables, cached per-variant to disk. Feasibility measured 2026-08-30 (docs/benchmarks.md): most of the grid solves in seconds-to-minutes; frontier boards (5,5,4; the k=4 win boards; 6x6 gravity; 7x6) exceed laptop budgets in pure Python. **The experiment grid is feasibility-gated: only variants with measured-tractable exact labeling enter training/eval.**
 - Metric: exact per-move regret vs. optimal value (win/draw/loss-aware), plus sample-efficiency curves (adaptation samples to reach regret ≤ ε).
+- Ground-truth provenance (for the methods section): 37 grid cells validated against published results (docs/known-results.md); gravity k=3 and knob combinations (e.g. misère+torus) have no published values anywhere — there the solver is the first word, self-certified against a pruning-free reference solver.
 - Scale-up chapter (only if core done, December): 2-3 chess variants via Fairy-Stockfish, engine-eval regret proxy.
 
 ## 4. Models (all parameter-matched, 2-3 sizes each)
@@ -69,8 +70,8 @@ Training: supervised distillation from exact solutions (policy = optimal-move se
 
 ### Track A — Research
 
-- **Sep w1-2:** harness — game engine + knobs, exact solver + cached tables, dataset generator, eval suite, experiment tracker. Scope-freeze doc + parking-lot file. **Gate G1 (Sep 14): solver validated against known m,n,k results; regret metric unit-tested.**
-- **Sep w3-4:** M0 trained across grid; E1 complete. **Gate G2 (Sep 30): baseline transfer curves plotted. No new architecture before G2.**
+- **Sep w1-2:** harness — game engine + knobs, exact solver + cached tables, dataset generator, eval suite, experiment tracker. Scope-freeze doc + parking-lot file. **Gate G1 (Sep 14): solver validated against known m,n,k results; regret metric unit-tested.** *(Done 2026-08-30 — G1 met early: 37 sourced cells validated, zero discrepancies. M0/E1 starts immediately; the banked ~2 weeks cushion November, the flagged collision month.)*
+- **Sep w3-4:** M0 trained across grid; E1 complete. **Gate G2 (Sep 30): baseline transfer curves plotted. No new architecture before G2.** Also at G2: keep-or-drop decision on the frontier boards (default: drop; spend 1-2 days on symmetry reduction only if E1 design needs the big boards — docs/benchmarks.md, docs/parking-lot.md).
 - **Oct:** M1, M2; E2. **Gate G3 (Oct 31): H1 answerable from data in hand (either direction); framing headline locked (§1); pivot decision if H1 null (promote E6).** M3 (sparse gating) is **cut by default** — build only if G3 lands ≥1 week early with H1 positive.
 - **Nov (priority order — lower items are the cut line, not the top):**
   1. w1: paper skeleton drafted (intro, related work from §2 table, method) — writing starts now, not December.
@@ -117,7 +118,7 @@ Weekly cadence: one experiment goal per week; results logged even when negative;
 | Concept probes unfaithful | probe-vs-occlusion disagreement | Already planned: causal checks are part of E4; disagreement is itself a finding. |
 | Matched-params disputed | reviewer concern | 2-3 sizes per model; report params + FLOPs; freeze-ablation controls. |
 | Scope creep | parking-lot file growing into the plan | Gates G1-G4 immovable; plan changes only on failed experiment, never on new idea. |
-| Compute overrun | runs > minutes | Everything CPU-or-single-GPU sized by construction; chess chapter is the only cloud item and is optional. |
+| Compute overrun | runs > minutes | Confirmed 2026-08-30 for the feasibility-gated grid (docs/benchmarks.md); frontier boards excluded per §3; chess chapter is the only cloud item and is optional. |
 | Scooped | Dec re-sweep finds overlap | Deltas vs. each neighbor already tabled (§2); pivot emphasis to whichever delta survives. |
 | Solo calibration failure (framing/novelty misjudged) | external readers confused; workshop reviews cite framing | Track C exists for this: community feedback Sep+, collaborator outreach Nov, two external readers before Dec red-team; workshops chosen as the calibration-forgiving venue. |
 | November overload (ablations + outreach + interviews collide) | w2 slippage on E3/E4 | Nov is priority-ordered with an explicit cut line (§6); E4 pre-capped; E5 needs no runs; paper skeleton pulled into Nov w1 so Dec absorbs slack; below-the-line items default to paper-two. |
