@@ -1,6 +1,11 @@
 # Solver feasibility benchmarks (2026-08-30)
 
-Machine: Apple Silicon laptop, single core, pure Python 3.13. Solver v1 =
+Machine: Apple Silicon laptop, single core, pure Python 3.13.
+**Caveat (added 2026-08-30 evening): every timing here was measured while a
+separate training job had the machine at load ~20 with memory exhausted —
+treat all times as pessimistic (possibly 2-5x) and re-run
+`scripts/solve_grid.py` on an idle machine before trusting the frontier
+classification; some frontier boards may be reachable when idle.** Solver v1 =
 negamax + alpha-beta + TT + dead-position rule; v2 adds threat-forced move
 restriction in normal play (win now, else block a lone immediate threat; two
 open threats = loss). Every completed solve matched its sourced expectation
