@@ -236,8 +236,14 @@ class Engine:
 
     # --------------------------------------------------------------- helpers
     def first_player_to_move(self, state: State) -> bool:
+        """True if the player to move opened the game.
+
+        Derived from OCCUPANCY parity, not from stone counts: every move fills
+        exactly one empty cell under every knob, whereas `capture` moves stones
+        between owners, so `popcount(cur) == popcount(opp)` is false there.
+        """
         cur, opp = state
-        return cur.bit_count() == opp.bit_count()
+        return (cur | opp).bit_count() % 2 == 0
 
     def play(self, moves: list[int]) -> tuple[State, int | None]:
         """Apply a move sequence from the initial state; returns (state, status).

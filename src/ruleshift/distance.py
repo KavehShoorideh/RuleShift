@@ -70,7 +70,10 @@ def transfer(state: State, m_from: int, engine_to: Engine) -> State | None:
                 return None
         out.append(remap(bits, m_from, rules.m))
     moved = (out[0], out[1])
-    if moved[1].bit_count() - moved[0].bit_count() not in (0, 1):
+    # Ownership split plausibility: without capture the mover's opponent holds
+    # exactly as many stones or one more. Capture moves stones between owners,
+    # so no such bound holds there.
+    if not rules.capture and moved[1].bit_count() - moved[0].bit_count() not in (0, 1):
         return None
     try:
         if engine_to.full_status(moved) is not None:

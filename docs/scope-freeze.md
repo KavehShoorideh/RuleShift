@@ -31,7 +31,10 @@ Grid exclusion: variants with k > max(m, n) are excluded from the standard grid
 - **Action space = cell index** in every variant. Under gravity, the legal actions
   are the landing cells of the non-full columns (keeps policy heads uniform across knobs).
 - State is (cur, opp) bitboards from the perspective of the player to move.
-  Player identity is derivable: popcount(cur) == popcount(opp) iff cur is the first player.
+  Player identity is derivable from **occupancy parity**: the player to move
+  opened the game iff popcount(cur | opp) is even. (Stone-count equality is NOT
+  a valid derivation — `capture` moves stones between owners without changing
+  move parity. Corrected 2026-08-31 after differential testing caught it.)
 - Value scale is WDL {-1, 0, +1} from the perspective of the player to move.
 - Per-move regret = value(best move) - value(move), in {0, 1, 2}.
 
