@@ -13,6 +13,12 @@ if experiments must label those variants; candidate techniques, in order:
 - TT memory cap + replacement policy for the largest variants.
 - Mixed optimal/ε-random position sampling for datasets (v1 is uniform-random playouts).
 
+## Benchmark-ification (decide at G5, post-preprint)
+- Gymnasium-compatible env wrapper (reset(rules)/step/obs/reward) so external
+  RL/world-model agents can plug in; starter kit + one baseline agent;
+  exact-regret scoring API as the published evaluation contract. Instrument
+  first, benchmark as upside -- only worth doing with a preprint to anchor it.
+
 ## Rule knobs deferred from v1
 - Pie rule.
 - Double-move (breaks the (cur, opp)-alternation state convention — needs explicit to-move).

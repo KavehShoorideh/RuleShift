@@ -37,3 +37,12 @@ scripts/e1_baseline.py. Numbers below are means over seeds.
 Pilot caveats: 2 seeds (plan requires >=5 for reported numbers); k=3 only;
 misere/torus capped at 16-cell boards pending solver speedups; distances only
 span 1-2 (k and board-size axes will widen the range in the full grid).
+
+## Decisions taken for full E1 (2026-08-30, applied identically to all models)
+
+- Budget grid: {0, 10, 30, 100, 300, 1000}; scratch controls at {30, 100, 300, 1000}.
+- Adaptation: steps = min(25 x n, 2500) at lr 3e-4 (dip mitigation, item 3).
+- Scratch: steps = min(50 x n, 4000).
+- Grid extended with feasible k=4 cells (plain, gravity, one misere) in train
+  and 4 more held-outs, widening the rule-distance axis to the k knob.
+- 5 seeds (plan minimum for reported numbers).

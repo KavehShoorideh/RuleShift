@@ -39,8 +39,8 @@ from ruleshift.tracker import Run
 from ruleshift.training import TrainConfig, adapt, eval_model_regret, tensorize, train
 
 # ---------------------------------------------------------------- variant pool
-def V(m, n, **kw):
-    return Ruleset(m=m, n=n, k=3, **kw)
+def V(m, n, k=3, **kw):
+    return Ruleset(m=m, n=n, k=k, **kw)
 
 # Feasibility-gated pilot pool. Misere/torus labeling cost grows fast with
 # board area (no threat pruning under misere), so those flags stay on <= 16-cell
@@ -52,6 +52,9 @@ TRAIN = (
     + [V(m, n, gravity=True) for m, n in [(3, 3), (4, 3), (3, 4), (4, 4), (5, 5)]]
     + [V(m, n, misere=True) for m, n in [(3, 3), (4, 3), (3, 4), (4, 4)]]
     + [V(m, n, torus=True) for m, n in [(3, 3), (4, 4)]]
+    + [V(m, n, k=4) for m, n in [(4, 4), (5, 4), (4, 5), (6, 3), (3, 6)]]
+    + [V(m, n, k=4, gravity=True) for m, n in [(4, 4), (5, 4), (4, 5), (5, 5)]]
+    + [V(4, 4, k=4, misere=True)]
 )
 HELD = (
     [(V(5, 4, gravity=True), "interp"), (V(4, 5, gravity=True), "interp"),
@@ -61,6 +64,9 @@ HELD = (
        (V(5, 4, gravity=True, misere=True), "extrap"),
        (V(3, 3, misere=True, torus=True), "extrap"),
        (V(3, 3, gravity=True, misere=True, torus=True), "extrap")]
+    + [(V(6, 4, k=4), "interp"), (V(4, 6, k=4, gravity=True), "interp"),
+       (V(5, 4, k=4, misere=True), "extrap"),
+       (V(4, 4, k=4, gravity=True, misere=True), "extrap")]
 )
 
 # ------------------------------------------------------------------- pipeline
@@ -110,11 +116,17 @@ def main():
     ap.add_argument("--seeds", type=int, default=2)
     ap.add_argument("--train-positions", type=int, default=2000)
     ap.add_argument("--eval-positions", type=int, default=300)
-    ap.add_argument("--budgets", type=int, nargs="+", default=[0, 10, 100, 1000])
-    ap.add_argument("--scratch-budgets", type=int, nargs="+", default=[100, 1000])
+    ap.add_argument("--budgets", type=int, nargs="+", default=[0, 10, 30, 100, 300, 1000])
+    ap.add_argument("--scratch-budgets", type=int, nargs="+", default=[30, 100, 300, 1000])
     ap.add_argument("--pretrain-steps", type=int, default=6000)
-    ap.add_argument("--adapt-steps", type=int, default=500)
-    ap.add_argument("--scratch-steps", type=int, default=2000)
+    # G2 protocol decision (docs/e1-pilot-notes.md): adaptation steps scale
+    # with budget (avoids the 10-sample overtraining dip), lower fine-tune lr;
+    # applied identically to every model in E1/E2.
+    ap.add_argument("--adapt-steps-per-sample", type=int, default=25)
+    ap.add_argument("--adapt-steps-cap", type=int, default=2500)
+    ap.add_argument("--adapt-lr", type=float, default=3e-4)
+    ap.add_argument("--scratch-steps-per-sample", type=int, default=50)
+    ap.add_argument("--scratch-steps-cap", type=int, default=4000)
     ap.add_argument("--hidden", type=int, default=256)
     ap.add_argument("--depth", type=int, default=3)
     ap.add_argument("--data-dir", default=str(ROOT / "data/datasets"))
@@ -173,9 +185,10 @@ def main():
             print(f"[3/4] seed {seed}: adaptation sweep over {len(held_packs)} held-outs", flush=True)
             for p in held_packs:
                 for n in args.budgets:
+                    steps = min(args.adapt_steps_per_sample * n, args.adapt_steps_cap)
                     adapted = adapt(model, p["tensors"], n,
-                                    TrainConfig(steps=args.adapt_steps, batch=min(64, max(n, 1)),
-                                                seed=seed))
+                                    TrainConfig(steps=steps, batch=min(64, max(n, 1)),
+                                                lr=args.adapt_lr, seed=seed))
                     rep = eval_model_regret(adapted, p["engine"], p["solver"], p["positions"])
                     row = dict(variant=p["rules"].variant_id, split=p["split"], dist=p["dist"],
                                seed=seed, method="finetune", budget=n,
@@ -187,7 +200,9 @@ def main():
                     scratch = M0(hidden=args.hidden, depth=args.depth)
                     torch.manual_seed(seed * 1000 + n)
                     train(scratch, p["tensors"].subsample(n, seed),
-                          TrainConfig(steps=args.scratch_steps, batch=min(64, n), seed=seed))
+                          TrainConfig(steps=min(args.scratch_steps_per_sample * n,
+                                                args.scratch_steps_cap),
+                                      batch=min(64, n), seed=seed))
                     rep = eval_model_regret(scratch, p["engine"], p["solver"], p["positions"])
                     row = dict(variant=p["rules"].variant_id, split=p["split"], dist=p["dist"],
                                seed=seed, method="scratch", budget=n,
