@@ -26,11 +26,14 @@ def test_distance():
 
 
 def test_standard_grid():
+    # amendment A4: default tier is 3..5, the largest board tier dropped
     grid = standard_grid()
-    # k=3: all 16 boards; k=4: all but 3x3 -> 15
-    assert len(grid) == 31
+    # k=3: all 9 boards; k=4: all but 3x3 -> 8
+    assert len(grid) == 17
     assert all(g.k <= max(g.m, g.n) for g in grid)
-    assert len({g.variant_id for g in grid}) == 31
+    assert max(max(g.m, g.n) for g in grid) == 5
+    assert len({g.variant_id for g in grid}) == 17
+    assert len(standard_grid(ms=range(3, 7), ns=range(3, 7))) == 31  # opt back in
 
 
 def test_validation():
@@ -44,4 +47,12 @@ def test_validation():
 
 def test_rule_vector():
     r = Ruleset(m=4, n=5, k=4, gravity=True)
-    assert r.rule_vector() == (4.0, 5.0, 4.0, 1.0, 0.0, 0.0)
+    assert r.rule_vector() == (4.0, 5.0, 4.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+    assert Ruleset(m=3, n=3, k=3, capture=True, scoring=True).rule_vector()[-2:] == (1.0, 1.0)
+
+
+def test_a2_knobs_in_id_roundtrip_and_distance():
+    r = Ruleset(m=3, n=3, k=3, capture=True, scoring=True)
+    assert r.variant_id == "m3n3k3_cap_sco"
+    assert Ruleset.from_dict(r.to_dict()) == r
+    assert Ruleset(m=3, n=3, k=3).distance(r) == 2

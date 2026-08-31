@@ -37,6 +37,11 @@ Any H1 outcome is publishable: positive → factorization thesis confirmed in ad
 
 ## 3. Domain and rule space
 
+> **Amended by `docs/plan-amendments.md` (A1, A2, A4, A5):** rule distance is
+> now solver-grounded (divergence of optimal play), two adversarial knobs
+> (`capture`, `scoring`) are in scope, the largest board tier is dropped, and
+> the harness targets a formalism-agnostic game interface.
+
 - Base family: m,n,k-games (tic-tac-toe = 3,3,3). Rule knobs (each a coordinate in rule space):
   - board (m,n) ∈ {3..6}², k ∈ {3,4}; gravity on/off (Connect-Four-ification); misère on/off (goal inversion); torus wrap on/off; forbidden-cell masks; optional: pie rule, double-move.
 - Rule distance: edit distance in knob space (and a learned/behavioral distance as analysis).
@@ -55,6 +60,9 @@ Any H1 outcome is publishable: positive → factorization thesis confirmed in ad
 Training: supervised distillation from exact solutions (policy = optimal-move set, value = exact WDL) — no RL loop needed; cheapest, lowest-variance path. Multi-variant batches over a training subset of the rule grid; held-out variants split by knob (interpolation) and by knob combination (extrapolation).
 
 ## 5. Experiment matrix
+
+> **Amended by `docs/plan-amendments.md` (A3):** adds E2b, the rule-conditioning
+> ablation (explicit knob vector vs. knob-free rule description) on M0 and M2 only.
 
 - E1: baseline transfer curves (M0): zero-shot / few-shot (10, 100, 1k, 10k positions) / from-scratch, per held-out variant.
 - E2: same for M1, M2 (M3 stretch). Primary plot: adaptation-samples-to-ε vs. rule distance, per model.

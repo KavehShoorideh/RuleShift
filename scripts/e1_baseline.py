@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 from ruleshift.dataset import build_dataset, load_dataset, sample_positions, save_dataset
+from ruleshift.distance import behavioral_distance
 from ruleshift.engine import Engine
 from ruleshift.metrics import evaluate_policy
 from ruleshift.models import M0
@@ -111,6 +112,17 @@ def held_pack(rules, train_n, n_eval, seed_split, cache_dir):
     return engine, solver, positions, data, len(pool)
 
 
+_SOLVERS: dict[str, Solver] = {}
+
+
+def solver_cache(rules):
+    """One Solver per variant, so distance pairs reuse transposition tables."""
+    key = rules.variant_id
+    if key not in _SOLVERS:
+        _SOLVERS[key] = Solver(Engine(rules))
+    return _SOLVERS[key]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--seeds", type=int, default=2)
@@ -133,6 +145,8 @@ def main():
     ap.add_argument("--cache-dir", default=str(ROOT / "data/tables"))
     ap.add_argument("--fig-dir", default=str(ROOT / "figures"))
     ap.add_argument("--label-only", action="store_true", help="build/cache datasets, then exit")
+    ap.add_argument("--distance-positions", type=int, default=100,
+                    help="positions per pair for the A1 solver-grounded distance")
     args = ap.parse_args()
 
     cfg = vars(args) | {
@@ -155,18 +169,34 @@ def main():
             engine, solver, positions, data, pool_size = held_pack(
                 rules, args.train_positions, args.eval_positions, 9000 + i, args.cache_dir
             )
-            print(f"  held-out {rules.variant_id}: pool {pool_size}, eval {len(positions)} "
+            # A1: distance is divergence of OPTIMAL PLAY from the nearest
+            # training variant, not knob-edit count (which is kept as a label).
+            best = None
+            for t in TRAIN:
+                try:
+                    d = behavioral_distance(rules, t, n_positions=args.distance_positions,
+                                            seed=0, solver_b=solver_cache(t))
+                except ValueError:
+                    continue
+                if best is None or d.distance < best.distance:
+                    best = d
+            if best is None:
+                raise ValueError(f"{rules.variant_id}: no comparable training variant")
+            dist, knob_dist = best.distance, best.knob_distance
+            print(f"  held-out {rules.variant_id}: pool {pool_size}, eval {len(positions)}, "
+                  f"behavioural distance {dist:.3f} (knob {knob_dist}) "
                   f"({time.time() - t0:.1f}s)", flush=True)
-            dist = min(rules.distance(t) for t in TRAIN)
             rng = np.random.default_rng(500 + i)
             rand_fn = lambda s, _e=engine, _r=rng: _e.legal_moves(s)[_r.integers(len(_e.legal_moves(s)))]
             rand_regret = evaluate_policy(solver, rand_fn, positions).mean_regret
             held_packs.append(
-                dict(rules=rules, split=split, dist=dist, tensors=tensorize(data, rules),
-                     engine=engine, solver=solver, positions=positions, random_regret=rand_regret)
+                dict(rules=rules, split=split, dist=dist, knob_dist=knob_dist,
+                     tensors=tensorize(data, rules), engine=engine, solver=solver,
+                     positions=positions, random_regret=rand_regret)
             )
             run.log(kind="variant", variant=rules.variant_id, split=split, dist=dist,
-                    random_regret=rand_regret)
+                    knob_dist=knob_dist, policy_disagreement=best.policy_disagreement,
+                    value_divergence=best.value_divergence, random_regret=rand_regret)
         if args.label_only:
             run.finish(label_only=True)
             print("labeling done (label-only mode)", flush=True)
@@ -191,7 +221,7 @@ def main():
                                                 lr=args.adapt_lr, seed=seed))
                     rep = eval_model_regret(adapted, p["engine"], p["solver"], p["positions"])
                     row = dict(variant=p["rules"].variant_id, split=p["split"], dist=p["dist"],
-                               seed=seed, method="finetune", budget=n,
+                               knob_dist=p["knob_dist"], seed=seed, method="finetune", budget=n,
                                mean_regret=rep.mean_regret, frac_optimal=rep.frac_optimal,
                                random_regret=p["random_regret"])
                     results.append(row)
@@ -205,7 +235,7 @@ def main():
                                       batch=min(64, n), seed=seed))
                     rep = eval_model_regret(scratch, p["engine"], p["solver"], p["positions"])
                     row = dict(variant=p["rules"].variant_id, split=p["split"], dist=p["dist"],
-                               seed=seed, method="scratch", budget=n,
+                               knob_dist=p["knob_dist"], seed=seed, method="scratch", budget=n,
                                mean_regret=rep.mean_regret, frac_optimal=rep.frac_optimal,
                                random_regret=p["random_regret"])
                     results.append(row)
@@ -304,9 +334,8 @@ def make_figures(results, budgets, fig_dir):
     for r in zs:
         per_var.setdefault(r["variant"], dict(dist=r["dist"], vals=[], rand=r["random_regret"]))
         per_var[r["variant"]]["vals"].append(r["mean_regret"])
-    jitter = {v: (i % 3 - 1) * 0.06 for i, v in enumerate(sorted(per_var))}
     for i, (v, d) in enumerate(sorted(per_var.items())):
-        x, y = d["dist"] + jitter[v], float(np.mean(d["vals"]))
+        x, y = d["dist"], float(np.mean(d["vals"]))
         ax.scatter([x], [y], s=64, color=BLUE, zorder=4)
         ax.annotate(v, (x, y), xytext=(0, -12 if i % 2 else 8), textcoords="offset points",
                     ha="center", fontsize=6.5, color=MUTED)
@@ -314,11 +343,11 @@ def make_figures(results, budgets, fig_dir):
     ax.axhline(rand, color=BASE, linewidth=1.2, linestyle=(0, (2, 3)))
     ax.annotate("random play (mean)", (0.02, rand), xycoords=("axes fraction", "data"),
                 xytext=(0, 4), textcoords="offset points", fontsize=8.5, color=MUTED)
-    ax.set_xticks(sorted({d["dist"] for d in per_var.values()}))
     ax.set_ylim(bottom=0)
-    ax.set_xlabel("rule distance to nearest training variant", color=INK2, fontsize=10)
+    ax.set_xlabel("divergence of optimal play from nearest training variant "
+                  "(exact solver)", color=INK2, fontsize=10)
     ax.set_ylabel("zero-shot mean exact regret", color=INK2, fontsize=10)
-    ax.set_title("Zero-shot regret vs. rule distance (E1 pilot)",
+    ax.set_title("Zero-shot regret vs. solver-grounded rule distance (E1)",
                  color=INK, fontsize=12, loc="left", pad=14, fontweight="semibold")
     fig.tight_layout()
     fig.savefig(fig_dir / "e1_pilot_zeroshot.png", facecolor=SURFACE)

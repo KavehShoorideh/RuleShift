@@ -21,16 +21,12 @@ def _plain(engine: Engine, cur: int, opp: int, memo: dict) -> int:
     if hit is not None:
         return hit
     best = -2
-    misere = engine.rules.misere
-    full = engine.full
     for mv in engine.legal_moves((cur, opp)):
-        nxt = cur | (1 << mv)
-        if engine.completes_line(nxt, mv):
-            v = LOSS if misere else WIN
-        elif (nxt | opp) == full:
-            v = DRAW
+        nxt_state, terminal = engine.step((cur, opp), mv)
+        if terminal is not None:
+            v = -terminal
         else:
-            v = -_plain(engine, opp, nxt, memo)
+            v = -_plain(engine, nxt_state[0], nxt_state[1], memo)
         if v > best:
             best = v
     memo[key] = best

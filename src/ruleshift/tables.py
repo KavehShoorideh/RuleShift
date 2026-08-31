@@ -35,8 +35,8 @@ def enumerate_reachable(engine: Engine, limit: int | None = None) -> list[State]
         s = dq.popleft()
         out.append(s)
         for mv in engine.legal_moves(s):
-            s2 = engine.apply(s, mv)
-            if engine.status_after(s2, mv) is not None:
+            s2, status = engine.step(s, mv)
+            if status is not None:
                 continue
             if s2 not in seen:
                 seen.add(s2)

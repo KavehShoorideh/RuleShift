@@ -13,7 +13,7 @@ from typing import Iterable
 
 Cell = tuple[int, int]  # (r, c)
 
-BOOL_KNOBS = ("gravity", "misere", "torus")
+BOOL_KNOBS = ("gravity", "misere", "torus", "capture", "scoring")
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,10 @@ class Ruleset:
     gravity: bool = False
     misere: bool = False
     torus: bool = False
+    # Adversarial knobs (amendment A2), designed to cut across the
+    # architecture's seams rather than align with it:
+    capture: bool = False  # ENTANGLED: dynamics + win condition change together
+    scoring: bool = False  # DIFFUSE: value is a line-count differential, not an event
     forbidden: frozenset = frozenset()  # frozenset[Cell]
 
     def __post_init__(self) -> None:
@@ -65,6 +69,10 @@ class Ruleset:
             parts.append("mis")
         if self.torus:
             parts.append("tor")
+        if self.capture:
+            parts.append("cap")
+        if self.scoring:
+            parts.append("sco")
         if self.forbidden:
             parts.append("f" + "-".join(f"{r}.{c}" for r, c in sorted(self.forbidden)))
         return "_".join(parts)
@@ -77,6 +85,8 @@ class Ruleset:
             "gravity": self.gravity,
             "misere": self.misere,
             "torus": self.torus,
+            "capture": self.capture,
+            "scoring": self.scoring,
             "forbidden": sorted([r, c] for r, c in self.forbidden),
         }
 
@@ -89,12 +99,16 @@ class Ruleset:
             gravity=d.get("gravity", False),
             misere=d.get("misere", False),
             torus=d.get("torus", False),
+            capture=d.get("capture", False),
+            scoring=d.get("scoring", False),
             forbidden=frozenset(tuple(c) for c in d.get("forbidden", [])),
         )
 
     def rule_vector(self) -> tuple[float, ...]:
-        """Numeric conditioning vector [m, n, k, gravity, misere, torus].
+        """Explicit knob vector [m, n, k, gravity, misere, torus, capture, scoring].
 
+        This is conditioning MODE 1 of the A3 ablation: it hands the model our
+        own factorization. Mode 2 (knob-free) lives in `ruleshift.descriptor`.
         Forbidden cells enter models through the board planes (playable mask),
         not this vector. Normalization is model-side.
         """
@@ -105,10 +119,16 @@ class Ruleset:
             float(self.gravity),
             float(self.misere),
             float(self.torus),
+            float(self.capture),
+            float(self.scoring),
         )
 
     def distance(self, other: "Ruleset") -> int:
-        """Knob edit distance (docs/scope-freeze.md)."""
+        """Knob edit distance — DESCRIPTIVE LABEL ONLY (amendment A1).
+
+        The primary distance axis is solver-grounded divergence of optimal
+        play; see `ruleshift.distance.behavioral_distance`.
+        """
         d = abs(self.m - other.m) + abs(self.n - other.n) + abs(self.k - other.k)
         d += sum(getattr(self, kn) != getattr(other, kn) for kn in BOOL_KNOBS)
         d += len(self.forbidden ^ other.forbidden)
@@ -116,14 +136,18 @@ class Ruleset:
 
 
 def standard_grid(
-    ms: Iterable[int] = range(3, 7),
-    ns: Iterable[int] = range(3, 7),
+    ms: Iterable[int] = range(3, 6),
+    ns: Iterable[int] = range(3, 6),
     ks: Iterable[int] = (3, 4),
     gravity: Iterable[bool] = (False,),
     misere: Iterable[bool] = (False,),
     torus: Iterable[bool] = (False,),
 ) -> list[Ruleset]:
-    """The plan's rule grid (docs/plan.md par.3), excluding degenerate k > max(m, n)."""
+    """The rule grid (docs/plan.md par.3), excluding degenerate k > max(m, n).
+
+    Amendment A4: the largest board tier (6) is dropped from the default to
+    fund A1-A3; pass explicit ranges to opt back in for a specific study.
+    """
     out = []
     for m, n, k, g, mi, t in product(ms, ns, ks, gravity, misere, torus):
         if k > max(m, n):

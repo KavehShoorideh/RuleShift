@@ -19,8 +19,10 @@ from .dataset import encode_state
 from .engine import Engine, State
 from .metrics import RegretReport, evaluate_policy
 from .models import (
+    KNOB,
     M0,
     PAD,
+    conditioning_vector,
     native_to_frame,
     norm_rule_vector,
     pad_cells,
@@ -48,10 +50,10 @@ class Tensors:
         return Tensors(self.x[idx], self.policy[idx], self.legal[idx], self.value[idx], self.rules)
 
 
-def tensorize(data: dict, rules: Ruleset) -> Tensors:
+def tensorize(data: dict, rules: Ruleset, mode: str = KNOB) -> Tensors:
     n, m = rules.n, rules.m
     boards = np.stack([pad_planes(b) for b in data["boards"]])
-    rule = norm_rule_vector(rules)
+    rule = conditioning_vector(Engine(rules), mode)
     x = np.concatenate(
         [boards.reshape(len(boards), -1), np.tile(rule, (len(boards), 1))], axis=1
     ).astype(np.float32)
@@ -128,7 +130,7 @@ def train(
         loss.backward()
         opt.step()
         if log is not None and (step % 200 == 0 or step == cfg.steps - 1):
-            log(step=step, loss=float(loss), policy_loss=pol_l, value_loss=val_l)
+            log(step=step, loss=float(loss.detach()), policy_loss=pol_l, value_loss=val_l)
     model.eval()
     return model
 
@@ -142,10 +144,12 @@ def adapt(model: M0, target: Tensors, n_samples: int, cfg: TrainConfig) -> M0:
     return train(adapted, sub, cfg)
 
 
-def model_policy_fn(model: M0, engine: Engine, device: str = "cpu") -> Callable[[State], int]:
+def model_policy_fn(
+    model: M0, engine: Engine, device: str = "cpu", mode: str | None = None
+) -> Callable[[State], int]:
     """Greedy move chooser over legal moves (native indices) for metrics.evaluate_policy."""
     rules = engine.rules
-    rv = norm_rule_vector(rules)
+    rv = conditioning_vector(engine, mode or getattr(model, "conditioning", KNOB))
     dev = torch.device(device)
     model.to(dev).eval()
 

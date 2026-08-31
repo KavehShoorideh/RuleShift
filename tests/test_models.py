@@ -55,7 +55,7 @@ def test_m0_forward_and_sizes():
 
 def test_norm_rule_vector():
     rv = norm_rule_vector(Ruleset(m=6, n=3, k=4, misere=True))
-    assert rv.tolist() == [1.0, 0.5, 1.0, 0.0, 1.0, 0.0]
+    assert rv.tolist() == [1.0, 0.5, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0]
 
 
 @pytest.fixture(scope="module")
@@ -115,3 +115,36 @@ def test_m0_learns_tictactoe(ttt_data):
     eval_positions = sample_positions(engine, 150, seed=999)
     report = eval_model_regret(model, engine, solver, eval_positions)
     assert report.mean_regret < 0.2, f"mean regret {report.mean_regret}"
+
+
+def test_conditioning_modes_a3():
+    """A3: both conditioning modes work end to end and differ in width."""
+    from ruleshift.models import DESCRIPTOR, KNOB, conditioning_vector, input_dim
+
+    engine = Engine(Ruleset(m=4, n=3, k=3, gravity=True))
+    knob = conditioning_vector(engine, KNOB)
+    desc = conditioning_vector(engine, DESCRIPTOR)
+    assert knob.shape == (8,)
+    assert desc.shape == (115,)
+    assert input_dim(DESCRIPTOR) > input_dim(KNOB)
+
+    # a descriptor-conditioned model trains on descriptor-tensorized data
+    solver = Solver(engine)
+    data = build_dataset(engine, solver, n=60, seed=0, strict=False)
+    t = tensorize(data, engine.rules, mode=DESCRIPTOR)
+    model = M0(hidden=32, depth=2, conditioning=DESCRIPTOR)
+    assert t.x.shape[1] == input_dim(DESCRIPTOR)
+    train(model, t, TrainConfig(steps=30, batch=16, seed=0))
+    fn = model_policy_fn(model, engine)  # picks up the model's own mode
+    s = engine.initial()
+    assert fn(s) in engine.legal_moves(s)
+
+
+def test_knob_free_descriptor_does_not_read_knobs():
+    """Two variants that differ only in a knob must still be distinguishable
+    from the descriptor alone -- otherwise mode 2 is uninformative."""
+    from ruleshift.models import DESCRIPTOR, conditioning_vector
+
+    a = conditioning_vector(Engine(Ruleset(m=3, n=3, k=3)), DESCRIPTOR)
+    b = conditioning_vector(Engine(Ruleset(m=3, n=3, k=3, misere=True)), DESCRIPTOR)
+    assert not np.array_equal(a, b)

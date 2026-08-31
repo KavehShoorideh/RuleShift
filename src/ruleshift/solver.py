@@ -4,6 +4,12 @@ Correctness is certified in tests against a pruning-free reference solver
 across knob combinations (tests/reference.py). With the full window
 (LOSS, WIN), returned values are exact: the value domain is confined to
 [-1, +1], so a bound at the boundary is the value itself.
+
+Two optimizations (dead positions, threat-forced moves) assume line completion
+is an immediate, local, monotonic event. The A2 adversarial knobs break that
+assumption, so they run a generic `Engine.step` path instead — slower, and
+gated by `Engine.fast_path` rather than by knob names, so any future game
+family implementing `ruleshift.interface.Game` gets the correct treatment.
 """
 from __future__ import annotations
 
@@ -39,13 +45,10 @@ class Solver:
 
     def child_value(self, state: State, mv: int) -> int:
         """Exact value of playing mv in state, from the mover's perspective."""
-        cur, opp = state
-        nxt = cur | (1 << mv)
-        if self.engine.completes_line(nxt, mv):
-            return LOSS if self.engine.rules.misere else WIN
-        if (nxt | opp) == self.engine.full:
-            return DRAW
-        return -self._search(opp, nxt, LOSS, WIN)
+        nxt, terminal = self.engine.step(state, mv)
+        if terminal is not None:
+            return -terminal
+        return -self._search(nxt[0], nxt[1], LOSS, WIN)
 
     # ----------------------------------------------------------------- core
     def _search(self, cur: int, opp: int, alpha: int, beta: int) -> int:
@@ -70,6 +73,51 @@ class Solver:
                     beta = v
         alpha_orig = alpha
         engine = self.engine
+
+        if engine.fast_path:
+            best, best_move = self._search_fast(cur, opp, alpha, beta, tt_move, key)
+            if best is None:  # an early exact cutoff already stored the entry
+                return best_move
+        else:
+            best, best_move = self._search_generic(cur, opp, alpha, beta, tt_move)
+
+        if best <= alpha_orig:
+            flag = UPPER
+        elif best >= beta:
+            flag = LOWER
+        else:
+            flag = EXACT
+        self.tt[key] = (best, flag, best_move)
+        return best
+
+    def _search_generic(self, cur, opp, alpha, beta, tt_move):
+        """No structural assumptions: only the Game contract (step + legal_moves)."""
+        engine = self.engine
+        state = (cur, opp)
+        moves = engine.legal_moves(state)
+        if tt_move >= 0 and tt_move in moves:
+            moves.remove(tt_move)
+            moves.insert(0, tt_move)
+        best, best_move = -2, -1
+        for mv in moves:
+            nxt, terminal = engine.step(state, mv)
+            v = -(terminal if terminal is not None
+                  else self._search(nxt[0], nxt[1], -beta, -alpha))
+            if v > best:
+                best, best_move = v, mv
+            if best > alpha:
+                alpha = best
+            if alpha >= beta or best == WIN:
+                break
+        return best, best_move
+
+    def _search_fast(self, cur, opp, alpha, beta, tt_move, key):
+        """Optimized path for monotonic, immediate-terminal line games.
+
+        Returns (best, best_move), or (None, value) when an early exact cutoff
+        has already written the TT entry.
+        """
+        engine = self.engine
         occ = cur | opp
         misere = engine.rules.misere
         full = engine.full
@@ -78,7 +126,6 @@ class Solver:
         # Dead-position rule: if every line already contains stones of both
         # players, no line can ever be completed, so the game is an exact draw
         # (sound in misere too: nobody can ever be made to complete a line).
-        # Certified against the rule-free reference solver in tests.
         dead = True
         for mask in engine.lines:
             if not (mask & cur) or not (mask & opp):
@@ -86,7 +133,7 @@ class Solver:
                 break
         if dead:
             self.tt[key] = (DRAW, EXACT, -1)
-            return DRAW
+            return None, DRAW
 
         if engine.rules.gravity:
             moves = engine.legal_moves((cur, opp))
@@ -102,27 +149,23 @@ class Solver:
             for mv in moves:
                 if completes(cur | (1 << mv), mv):
                     self.tt[key] = (WIN, EXACT, mv)
-                    return WIN
-            # Threat-forced restriction (normal play only): cells where the
-            # OPPONENT would complete a line next turn. With no immediate win
-            # of our own, two open threats are unanswerable (they occupy
-            # distinct cells -- distinct columns under gravity -- and playing
-            # elsewhere leaves each threat cell playable for the opponent);
-            # one open threat forces the block. Certified vs. the reference
-            # solver in tests.
+                    return None, WIN
+            # Threat-forced restriction: cells where the OPPONENT would complete
+            # a line next turn. With no immediate win of our own, two open
+            # threats are unanswerable (they occupy distinct cells -- distinct
+            # columns under gravity -- and playing elsewhere leaves each threat
+            # cell playable); one open threat forces the block.
             threat = -1
             for mv in moves:
                 if completes(opp | (1 << mv), mv):
                     if threat >= 0:
                         self.tt[key] = (LOSS, EXACT, mv)
-                        return LOSS
+                        return None, LOSS
                     threat = mv
             if threat >= 0:
                 moves = [threat]
 
-        best = -2
-        best_move = -1
-        forced_loss_move = -1
+        best, best_move, forced_loss_move = -2, -1, -1
         for mv in moves:
             nxt = cur | (1 << mv)
             if completes(nxt, mv):
@@ -134,25 +177,15 @@ class Solver:
             else:
                 v = -self._search(opp, nxt, -beta, -alpha)
             if v > best:
-                best = v
-                best_move = mv
+                best, best_move = v, mv
             if best > alpha:
                 alpha = best
             if alpha >= beta or best == WIN:
                 break
         if best == -2:
             # misere: every legal move completes a line -> forced loss
-            best = LOSS
-            best_move = forced_loss_move
-
-        if best <= alpha_orig:
-            flag = UPPER
-        elif best >= beta:
-            flag = LOWER
-        else:
-            flag = EXACT
-        self.tt[key] = (best, flag, best_move)
-        return best
+            best, best_move = LOSS, forced_loss_move
+        return best, best_move
 
     # ---------------------------------------------------------- persistence
     def save(self, path: str | Path) -> None:

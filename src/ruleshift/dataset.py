@@ -34,8 +34,8 @@ def sample_positions(
                 seen.add(s)
                 out.append(s)
             mv = rng.choice(engine.legal_moves(s))
-            s2 = engine.apply(s, mv)
-            if engine.status_after(s2, mv) is not None:
+            s2, status = engine.step(s, mv)
+            if status is not None:
                 break
             s = s2
         stall = stall + 1 if len(out) == before else 0
